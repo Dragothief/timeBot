@@ -1,6 +1,7 @@
+require('dotenv').config();
 const Discord = require('discord.js');
 const fs = require('fs');
-const TOKEN = "MTEwNjQ0OTQyODg4NzM4MDAzOQ.G-yT7F.JfpqME4yVk-ie4fGVZ5KQXPqt3rAmx-LEMkp_w";
+const TOKEN = process.env.BOT_TOKEN;
 const { Client, GatewayIntentBits } = require('discord.js');
 var cron = require('node-cron');
 const userData = {};

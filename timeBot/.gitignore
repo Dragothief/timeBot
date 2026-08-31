@@ -1,0 +1,19 @@
+# Dependencies
+node_modules/
+
+# Environment variables (contains the bot token)
+.env
+
+# Bot runtime data - changes constantly, not source code
+durations.json
+durations.xlsx
+habits.json
+habits.xlsx
+newDurations.json
+MyExcelFile.xlsx
+
+# Frontend build output
+build/
+
+# Editor/tool cruft
+tempCodeRunnerFile.exe
