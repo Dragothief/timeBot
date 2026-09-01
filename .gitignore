@@ -11,6 +11,7 @@ habits.json
 habits.xlsx
 newDurations.json
 MyExcelFile.xlsx
+activeSessions.json
 
 # Frontend build output
 build/

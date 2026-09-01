@@ -29,12 +29,46 @@ const data = JSON.parse(fs.readFileSync('durations.json', 'utf8'));
 const foldersPath = path.join(__dirname, 'commands');
 const commandFolders = fs.readdirSync(foldersPath);
 const habitData = JSON.parse(fs.readFileSync('habits.json', 'utf8'));
-const ytdl = require('ytdl-core');
 require('dotenv').config();
 const { createExcelFile, getDateUpdateCellDuration } = require('./excel.js');
 const { channel } = require('diagnostics_channel');
 
+// Local backup of who's currently in a voice call, so an active session
+// survives the bot/server dying mid-call instead of getting lost entirely.
+const activeSessionsFilePath = 'activeSessions.json';
 
+function loadActiveSessions() {
+  try {
+    if (fs.existsSync(activeSessionsFilePath)) {
+      const savedSessions = JSON.parse(fs.readFileSync(activeSessionsFilePath, 'utf8'));
+      for (const [userId, session] of Object.entries(savedSessions)) {
+        voiceCallStartTimes.set(userId, session.startTime);
+        formattedVoiceCallStartTimes.set(userId, new Date(session.formattedStartTime));
+      }
+      console.log(`Restored ${Object.keys(savedSessions).length} active voice session(s) from disk.`);
+    }
+  } catch (error) {
+    console.error('Failed to load active sessions file:', error);
+  }
+}
+
+function saveActiveSessions() {
+  const sessions = {};
+  for (const [userId, startTime] of voiceCallStartTimes.entries()) {
+    const formattedStartTime = formattedVoiceCallStartTimes.get(userId) || new Date(startTime);
+    sessions[userId] = {
+      startTime,
+      formattedStartTime: formattedStartTime.toISOString(),
+    };
+  }
+  try {
+    fs.writeFileSync(activeSessionsFilePath, JSON.stringify(sessions, null, 2));
+  } catch (error) {
+    console.error('Failed to save active sessions file:', error);
+  }
+}
+
+loadActiveSessions();
 
 
 for (const folder of commandFolders) {
@@ -190,6 +224,7 @@ client.on('ready', () => {
       let startTime = Date.now();
       voiceCallStartTimes.set(userId, startTime);
       formattedVoiceCallStartTimes.set(userId, new Date());
+      saveActiveSessions();
       console.log(`${member.user.tag} joined a voice call at ${startTime}.`);
       
       
@@ -261,6 +296,7 @@ client.on('ready', () => {
         }
 
         voiceCallStartTimes.delete(userId);
+        saveActiveSessions();
         console.log(`afkTime for user ${member.user.tag} ` + formatDuration(afkTime));
         console.log(`duration for user ${member.user.tag} ` + formatDuration(duration));
         if (afkTime > 0) {
