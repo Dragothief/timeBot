@@ -42,8 +42,16 @@ function loadActiveSessions() {
     if (fs.existsSync(activeSessionsFilePath)) {
       const savedSessions = JSON.parse(fs.readFileSync(activeSessionsFilePath, 'utf8'));
       for (const [userId, session] of Object.entries(savedSessions)) {
-        voiceCallStartTimes.set(userId, session.startTime);
-        formattedVoiceCallStartTimes.set(userId, new Date(session.formattedStartTime));
+        if (session.startTime !== undefined) {
+          voiceCallStartTimes.set(userId, session.startTime);
+          formattedVoiceCallStartTimes.set(userId, new Date(session.formattedStartTime));
+        }
+        if (session.afkStartTime !== undefined) {
+          afkTimeMap.set(userId, session.afkStartTime);
+        }
+        if (session.accumulatedAfkTime !== undefined) {
+          afkTimePostMap.set(userId, session.accumulatedAfkTime);
+        }
       }
       console.log(`Restored ${Object.keys(savedSessions).length} active voice session(s) from disk.`);
     }
@@ -54,13 +62,29 @@ function loadActiveSessions() {
 
 function saveActiveSessions() {
   const sessions = {};
-  for (const [userId, startTime] of voiceCallStartTimes.entries()) {
-    const formattedStartTime = formattedVoiceCallStartTimes.get(userId) || new Date(startTime);
-    sessions[userId] = {
-      startTime,
-      formattedStartTime: formattedStartTime.toISOString(),
-    };
+  const userIds = new Set([
+    ...voiceCallStartTimes.keys(),
+    ...afkTimeMap.keys(),
+    ...afkTimePostMap.keys(),
+  ]);
+
+  for (const userId of userIds) {
+    const session = {};
+    if (voiceCallStartTimes.has(userId)) {
+      const startTime = voiceCallStartTimes.get(userId);
+      const formattedStartTime = formattedVoiceCallStartTimes.get(userId) || new Date(startTime);
+      session.startTime = startTime;
+      session.formattedStartTime = formattedStartTime.toISOString();
+    }
+    if (afkTimeMap.has(userId)) {
+      session.afkStartTime = afkTimeMap.get(userId);
+    }
+    if (afkTimePostMap.has(userId)) {
+      session.accumulatedAfkTime = afkTimePostMap.get(userId);
+    }
+    sessions[userId] = session;
   }
+
   try {
     fs.writeFileSync(activeSessionsFilePath, JSON.stringify(sessions, null, 2));
   } catch (error) {
@@ -168,6 +192,7 @@ client.on('ready', () => {
   
       const afkTime = Date.now();
       afkTimeMap.set(userId, afkTime);
+      saveActiveSessions();
       // console.log(notifyClients.toString());
       // notifyClients({
       //   event: 'joinedAfk',
@@ -201,7 +226,8 @@ client.on('ready', () => {
         //use afkTimePostMap to cal and afktimeMap as a temporary storage.
         afkTimeMap.delete(userId);
         afkTimePostMap.set(userId, totalAfkTime);
-  
+        saveActiveSessions();
+
         console.log(totalAfkTime);
         // notifyClients({
         //   event: 'leftAfk',
@@ -262,6 +288,7 @@ client.on('ready', () => {
         if (oldState.channelId && !newState.channelId ) {
           calculateDuration(userId, member, voiceCallStartTimes, afkTimePostMap, data, formattedVoiceCallStartTimes);
           afkTimePostMap.delete(userId);
+          saveActiveSessions();
           const testCommandsChannel = client.channels.cache.get('1221893603383709858');
           }
   
