@@ -47,6 +47,14 @@ async function playNextSong(player, query, voiceChannel, textChannel) {
       guildId: voiceChannel.guild.id,
       adapterCreator: voiceChannel.guild.voiceAdapterCreator,
     });
+    // Temporary diagnostics: log every state the connection passes through
+    // so we can see exactly where it gets stuck instead of just "never ready".
+    connection.on('stateChange', (oldState, newState) => {
+      console.log(`Voice connection state: ${oldState.status} -> ${newState.status}`);
+    });
+    connection.on('error', (error) => {
+      console.error('Voice connection error:', error);
+    });
   }
 
   try {
