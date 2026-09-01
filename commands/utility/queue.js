@@ -7,15 +7,15 @@ module.exports = {
     .setDescription('Shows the current queue.'),
   async execute(interaction) {
     if(state.queue.length === 0) {
-      return interaction.reply('The queue is empty.');
+      return interaction.editReply('The queue is empty.');
     }
 
     const temp = state.queue;
     console.log(temp);
     const responseContent = temp.join('\n');
     console.log(responseContent);
-    interaction.reply(responseContent);
-  
-  
+    interaction.editReply(responseContent);
+
+
   }
 };

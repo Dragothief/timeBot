@@ -10,14 +10,11 @@
   "license": "ISC",
   "dependencies": {
     "@discordjs/voice": "^0.16.1",
-    "@distube/ytdl-core": "^4.16.12",
-    "axios": "^1.7.2",
     "discord.js": "^14.14.1",
     "dotenv": "^16.4.5",
     "exceljs": "^4.4.0",
     "ffmpeg-static": "^5.2.0",
-    "node-cron": "^3.0.3",
-    "ytdl-core": "^4.11.5"
+    "node-cron": "^3.0.3"
   },
   "keywords": [],
   "description": ""

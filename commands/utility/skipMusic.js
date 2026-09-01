@@ -7,10 +7,10 @@ module.exports = {
     .setDescription('Skips the current song.'),
   async execute(interaction) {
     if (!state.player || state.queue.length === 0) {
-      return interaction.reply('No song is currently playing.');
+      return interaction.editReply('No song is currently playing.');
     }
 
     state.player.stop(); // This will trigger the Idle event and play the next song
-    interaction.reply('Skipped the current song.');
+    interaction.editReply('Skipped the current song.');
   }
 };

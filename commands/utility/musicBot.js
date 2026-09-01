@@ -1,103 +1,136 @@
 const { SlashCommandBuilder } = require('@discordjs/builders');
-const { joinVoiceChannel, createAudioPlayer, createAudioResource, entersState, AudioPlayerStatus, VoiceConnectionStatus } = require('@discordjs/voice');
-const ytdl = require('@distube/ytdl-core');
-const axios = require('axios');
+const {
+  joinVoiceChannel,
+  createAudioPlayer,
+  createAudioResource,
+  entersState,
+  AudioPlayerStatus,
+  VoiceConnectionStatus,
+  getVoiceConnection,
+} = require('@discordjs/voice');
+const { spawn } = require('child_process');
 const state = require('./state'); // Adjust the path if necessary
-const API_KEY = 'AIzaSyCqWn9tH2s7OXsgtbd4t2DOfNZhO7z4TaI';
+
+function isYouTubeUrl(text) {
+  return /^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be)\//i.test(text);
+}
+
+// Spawns yt-dlp and streams the audio straight out of its stdout, no temp
+// files. yt-dlp handles both direct links and, via the "ytsearch1:" prefix,
+// searching YouTube and grabbing the top result itself — no separate API key
+// or search step needed.
+function spawnYtDlp(query) {
+  const ytdlp = spawn('yt-dlp', [
+    '-f', 'bestaudio',
+    '-o', '-',
+    '--no-playlist',
+    '--quiet',
+    '--no-warnings',
+    query,
+  ], { stdio: ['ignore', 'pipe', 'pipe'] });
+
+  ytdlp.on('error', (error) => {
+    console.error('Failed to start yt-dlp — is it installed and on PATH?', error);
+  });
+  ytdlp.stderr.on('data', (data) => {
+    console.error(`yt-dlp: ${data}`);
+  });
+
+  return ytdlp;
+}
+
+async function playNextSong(player, query, voiceChannel, textChannel) {
+  let connection = getVoiceConnection(voiceChannel.guild.id);
+  if (!connection) {
+    connection = joinVoiceChannel({
+      channelId: voiceChannel.id,
+      guildId: voiceChannel.guild.id,
+      adapterCreator: voiceChannel.guild.voiceAdapterCreator,
+    });
+  }
+
+  try {
+    await entersState(connection, VoiceConnectionStatus.Ready, 30_000);
+  } catch (error) {
+    console.error('Voice connection never became ready:', error);
+    textChannel.send('Could not connect to the voice channel.');
+    return;
+  }
+
+  const ytdlp = spawnYtDlp(query);
+
+  let resource;
+  try {
+    resource = createAudioResource(ytdlp.stdout);
+  } catch (error) {
+    console.error('Failed to create audio resource:', error);
+    textChannel.send(`Couldn't play that one — it may be age-restricted, region-locked, or YouTube changed something again.`);
+    ytdlp.kill();
+    return;
+  }
+
+  connection.subscribe(player);
+  player.play(resource);
+
+  // Clean up the yt-dlp process once this song is done or skipped, rather
+  // than leaving it running in the background.
+  player.once(AudioPlayerStatus.Idle, () => {
+    if (!ytdlp.killed) ytdlp.kill();
+  });
+}
 
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('playsong')
     .setDescription('Plays a song in the voice channel.')
-    .addStringOption(option => 
+    .addStringOption(option =>
       option.setName('keywords')
-        .setDescription('Keywords to search for the song you want to play.')
+        .setDescription('A YouTube link, or keywords to search for.')
         .setRequired(true)),
   async execute(interaction) {
     const member = interaction.member;
     const voiceChannel = member.voice.channel;
-    let songUrl;
-    const connection = joinVoiceChannel({
-        channelId: voiceChannel.id,
-        guildId: voiceChannel.guild.id,
-        adapterCreator: voiceChannel.guild.voiceAdapterCreator,
-      });
+
     if (!voiceChannel) {
-      return interaction.reply('You need to be in a voice channel to play a song.');
+      return interaction.editReply('You need to be in a voice channel to play a song.');
     }
 
     const keywords = interaction.options.getString('keywords');
-    if (ytdl.validateURL(keywords)) {
-      songUrl = keywords;
-    } else {
-      songUrl = await searchYouTube(keywords);
-    }
+    const query = isYouTubeUrl(keywords) ? keywords : `ytsearch1:${keywords}`;
 
-    if (!songUrl) {
-      return interaction.reply('No results found.');
-    }
-
-    if (!ytdl.validateURL(songUrl)) {
-      return interaction.reply('Invalid URL.');
-    }
-
-    state.queue.push(songUrl);
+    state.queue.push(query);
 
     if (!state.player) {
       state.player = createAudioPlayer();
+
       state.player.on(AudioPlayerStatus.Idle, () => {
         state.queue.shift();
         if (state.queue.length > 0) {
-          playNextSong(state.player, state.queue[0], voiceChannel);
+          playNextSong(state.player, state.queue[0], voiceChannel, interaction.channel);
         } else {
           state.player = null;
-          if (connection.state.status !== VoiceConnectionStatus.Destroyed) {
+          const connection = getVoiceConnection(voiceChannel.guild.id);
+          if (connection && connection.state.status !== VoiceConnectionStatus.Destroyed) {
             connection.destroy();
           }
-          interaction.channel.send("Playback finished.");
+          interaction.channel.send('Playback finished.');
+        }
+      });
+
+      state.player.on('error', (error) => {
+        console.error('Audio player error:', error);
+        interaction.channel.send('Something went wrong playing that song — skipping.');
+        state.queue.shift();
+        if (state.queue.length > 0) {
+          playNextSong(state.player, state.queue[0], voiceChannel, interaction.channel);
         }
       });
     }
 
     if (state.queue.length === 1) {
-      playNextSong(state.player, state.queue[0], voiceChannel);
+      playNextSong(state.player, state.queue[0], voiceChannel, interaction.channel);
     }
 
-    interaction.reply(`Song added to queue: ${songUrl}`);
+    interaction.editReply(`Added to queue: ${keywords}`);
   }
 };
-
-function playNextSong(player, songUrl, voiceChannel) {
-  const stream = ytdl(songUrl, { filter: 'audioonly', highWaterMark: 1 << 25 });
-  const resource = createAudioResource(stream);
-  player.play(resource);
-  const connection = joinVoiceChannel({
-    channelId: voiceChannel.id,
-    guildId: voiceChannel.guild.id,
-    adapterCreator: voiceChannel.guild.voiceAdapterCreator,
-  });
-  connection.subscribe(player);
-}
-
-// Function to search YouTube and get the top video URL
-async function searchYouTube(keywords) {
-  const response = await axios.get('https://www.googleapis.com/youtube/v3/search', {
-    params: {
-      part: 'snippet',
-      q: `${keywords}`,
-      type: 'video',
-      videoCategoryId: '10',
-      maxResults: 1,
-      order: 'relevance',
-      key: API_KEY,
-    },
-  });
-
-  const items = response.data.items;
-  if (items.length > 0) {
-    const videoId = items[0].id.videoId;
-    return `https://www.youtube.com/watch?v=${videoId}`;
-  } else {
-    return null;
-  }
-}
