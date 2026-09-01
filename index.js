@@ -2,6 +2,13 @@ require('dotenv').config();
 const Discord = require('discord.js');
 const fs = require('fs');
 const TOKEN = process.env.BOT_TOKEN;
+// Channel/user IDs are pulled from .env instead of hardcoded so this same
+// code can point at a test server just by using a different .env file.
+const BOT_COMMANDS_CHANNEL_ID = process.env.BOT_COMMANDS_CHANNEL_ID;
+const TEST_COMMANDS_CHANNEL_ID = process.env.TEST_COMMANDS_CHANNEL_ID;
+const AFK_CHANNEL_ID = process.env.AFK_CHANNEL_ID;
+const VOICE_ANNOUNCE_CHANNEL_ID = process.env.VOICE_ANNOUNCE_CHANNEL_ID;
+const REPORT_RECIPIENT_USER_ID = process.env.REPORT_RECIPIENT_USER_ID;
 const { Client, GatewayIntentBits,Collection } = require('discord.js');
 const userData = {};
 const path = require('node:path');
@@ -23,6 +30,9 @@ let voiceCallStartTimes = new Map();
 let formattedVoiceCallStartTimes = new Map();
 let afkTimeMap = new Map();
 let afkTimePostMap = new Map();
+// Cooldown so someone bouncing in and out of channels doesn't spam @everyone
+// repeatedly — checked per-user against their own last known session end time.
+const JOIN_ANNOUNCEMENT_COOLDOWN_MS = 5 * 60 * 1000;
 client.commands = new Collection();
 const durationsFilePath = 'durations.json';
 const data = JSON.parse(fs.readFileSync('durations.json', 'utf8'));
@@ -154,8 +164,8 @@ client.on('interactionCreate', async interaction => {
 client.on('ready', () => {
   console.log(`Logged in as ${client.user.tag}!`);
  
-  const botCommandsChannel = client.channels.cache.get('1106678185652912249');
-  const testCommandsChannel = client.channels.cache.get('1221893603383709858');
+  const botCommandsChannel = client.channels.cache.get(BOT_COMMANDS_CHANNEL_ID);
+  const testCommandsChannel = client.channels.cache.get(TEST_COMMANDS_CHANNEL_ID);
    
   // Schedule a task to happen every day at 8:00 pm
   cron.schedule('0 20 * * *', () => {
@@ -163,7 +173,7 @@ client.on('ready', () => {
     botCommandsChannel.send('Running a task at 8:00 pm every day'); 
 
     
-    client.users.fetch('256934873615302666', false).then((user) => {
+    client.users.fetch(REPORT_RECIPIENT_USER_ID, false).then((user) => {
       user.send({ files: ['./durations.xlsx'] });
       user.send({ files: ['./durations.json'] })
      });
@@ -177,15 +187,14 @@ client.on('ready', () => {
   client.on('voiceStateUpdate', (oldState, newState) => {
     const member = newState.member;
     const userId = member.id;
-    const botCommandsChannel = client.channels.cache.get('1106678185652912249');
+    const botCommandsChannel = client.channels.cache.get(BOT_COMMANDS_CHANNEL_ID);
   
     // Check the channel the user is in
    // console.log(`${member.user.tag} is in a voice channel.`);
   
   
-    const excludedChannelIds = ['1204240331001040998']; 
-    const includedChannelIds = ['777371570108235782', '777371570535530550'];
-    
+    const excludedChannelIds = [AFK_CHANNEL_ID];
+
     if(excludedChannelIds.includes(newState.channelId)){
       console.log(`${member.user.tag} joined 'Afk Channel'.`);
       
@@ -254,10 +263,20 @@ client.on('ready', () => {
       console.log(`${member.user.tag} joined a voice call at ${startTime}.`);
       
       
-      const atChannel = client.channels.cache.get('1222991295631589428');
+      const atChannel = client.channels.cache.get(VOICE_ANNOUNCE_CHANNEL_ID);
       const date = new Date();
-      if(userId != '1106449428887380039'){
-      atChannel.send(`@everyone ${member.user.tag} joined a voice call at ${date.toLocaleString()}.`);
+      if(userId != client.user.id){
+        // durations.json's lastLoggedInTime gets updated when THIS user leaves
+        // a call (see calculateDuration below), so checking it here tells us
+        // whether this same person was just in a call recently.
+        const lastSeenTime = (data[userId] && data[userId].lastLoggedInTime)
+          ? new Date(data[userId].lastLoggedInTime).getTime()
+          : 0;
+        if (Date.now() - lastSeenTime > JOIN_ANNOUNCEMENT_COOLDOWN_MS) {
+          atChannel.send(`@everyone ${member.user.tag} joined a voice call at ${date.toLocaleString()}.`);
+        } else {
+          console.log(`Skipping @everyone ping for ${member.user.tag} — they were in a call within the last 5 minutes.`);
+        }
       }
     //  notifyClients
     //   ({
@@ -289,7 +308,7 @@ client.on('ready', () => {
           calculateDuration(userId, member, voiceCallStartTimes, afkTimePostMap, data, formattedVoiceCallStartTimes);
           afkTimePostMap.delete(userId);
           saveActiveSessions();
-          const testCommandsChannel = client.channels.cache.get('1221893603383709858');
+          const testCommandsChannel = client.channels.cache.get(TEST_COMMANDS_CHANNEL_ID);
           }
   
 });
@@ -310,7 +329,7 @@ client.on('ready', () => {
       const formatStartTime = formattedVoiceCallStartTimes.get(userId);
       const formatEndTime = new Date();
       let afkTime = afkTimePostMap.get(userId);
-      const testCommandsChannel = client.channels.cache.get('1221893603383709858');
+      const testCommandsChannel = client.channels.cache.get(TEST_COMMANDS_CHANNEL_ID);
       const temp5 = new Date();
       let temp2 = `afkTime for user ${member.user.tag} ` + formatDuration(afkTime);
       const durationMessages = [`Duration Data for ${member.user.tag} at ${temp5.toLocaleDateString()}`];

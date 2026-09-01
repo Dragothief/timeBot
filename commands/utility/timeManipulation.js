@@ -3,6 +3,8 @@ const client = require('../../index.js');
 const { SlashCommandBuilder } = require('@discordjs/builders');
 const fs = require('fs');
 let tempMap = new Map();
+const TEST_COMMANDS_CHANNEL_ID = process.env.TEST_COMMANDS_CHANNEL_ID;
+const ADMIN_USER_ID = process.env.ADMIN_USER_ID;
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -61,13 +63,13 @@ module.exports = {
     const userId = tempMap.get(personName);
 
     // Fetch the channel inside the execute function to ensure it's available
-    const testCommandsChannel = client.channels.cache.get('1221893603383709858');
+    const testCommandsChannel = client.channels.cache.get(TEST_COMMANDS_CHANNEL_ID);
     if (!testCommandsChannel) {
       console.error('Test commands channel not found.');
       return;
     }
 
-    if (adminuserId !== "256934873615302666") {
+    if (adminuserId !== ADMIN_USER_ID) {
       testCommandsChannel.send(`${interaction.user.tag} tried to use the timemanipulation command.`);
       interaction.editReply('You are not authorized to use this command.');
       return;
